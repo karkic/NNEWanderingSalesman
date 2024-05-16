@@ -3,14 +3,19 @@ import math
 import pandas as pd
 from classes import Package
 from datetime import datetime
+import visualize 
 import datetime
+
 import neat
 import os
 
 MAX_PACKAGES = 8
 EOD_TIME = datetime.time(23,0)
 AVERAGE_SPEED = 20
-GENERATIONS = 15
+GENERATIONS = 2
+#shortest distance algorithom min/max
+SHORT_PENALTY = 0.0
+LONG_PENALTY = 9.2
 
 excel_file1 = 'WGUPS Distance Table.xlsx'
 excel_file2 = 'WGUPS Package File.xlsx'
@@ -74,7 +79,10 @@ def eval_genomes(genomes, config):
 #run algorithim of each genome
     i = 0
     for genome_id, genome in genomes:
-        packages= []
+
+        shortest_distance = 100.0
+        longest_distance = 0.0
+        packages=[]
         
         current_destination = 'Western Governors University 4001 South 700 East,  Salt Lake City, UT 84107'
         current_time = datetime.time(8,0)
@@ -88,13 +96,13 @@ def eval_genomes(genomes, config):
             if package.dAddress == ' 5383 South 900 East #104':
                 package.dAddress = ' 5383 S 900 East #104'
             packages.append(package)
-            genome_package_scores = []
         #runs each packages through network
         finished = False
         while finished == False:
             package_list = []
-            while len(package_list) <= 15: 
+            while len(package_list) <= MAX_PACKAGES: 
                 distances= []
+                genome_package_scores = []
                 for package in packages:
             #needed distance,package distance to hub, current time, current distance to hub, size of package list,current time,package deadline
                     distance = get_distance(package,current_destination)
@@ -128,13 +136,20 @@ def eval_genomes(genomes, config):
                 #print(best_package)
                 package_list.append(best_package)
                 if best_package == None:
-                    for package in packages:
-                        pass
-                        finished = True
+                    finished = True
                         #print(package.dStatus)
                     break
                 best_package.dStatus = "delivered"
-
+                #test if longest path or shortest path
+                if best_distance > longest_distance:
+                    longest_distance = best_distance
+                if best_distance < shortest_distance:
+                    shortest_distance = best_distance
+                #distance bounus/penalty points
+                if best_distance == 0.0:
+                    genome.fitness += 5
+                if best_distance > LONG_PENALTY:
+                    genome.fitness -= 5
                 broken_index_location = str(destinations[destinations['Unnamed: 1']== best_package.dAddress].index).split("'")
                 #print(current_destination)
                 current_destination = broken_index_location[1]
@@ -146,6 +161,15 @@ def eval_genomes(genomes, config):
                 #print(genome_id,': ',best_package.dID, ' : ', best_package.dAddress, ' : ', best_package.dTime)
             #go back to hub
             distance_to_hub = get_distance_to_hub(current_destination)
+            #test if longest path or shortest path
+            if distance_to_hub > longest_distance:
+                longest_distance = distance_to_hub
+            if distance_to_hub < shortest_distance:
+                shortest_distance = distance_to_hub
+            if distance_to_hub > LONG_PENALTY:
+                genome.fitness -= 5
+            
+            
             
             time_taken = datetime.timedelta(hours=distance_to_hub.item()/AVERAGE_SPEED)
             start_datetime = datetime.datetime(1900,1,1,current_time.hour,current_time.minute,current_time.second)
@@ -158,12 +182,14 @@ def eval_genomes(genomes, config):
         current_datetime=datetime.datetime(1900,1,1,current_time.hour,current_time.minute,current_time.second)
         total_datetime =eod_datetime - current_datetime
         #print(current_time)
+        genome.fitness += (LONG_PENALTY - longest_distance)*2
+        genome.fitness += (SHORT_PENALTY - shortest_distance)*2
         genome.fitness += total_datetime.total_seconds()/100
         for package in packages:
             if package.dDeadline != EOD_TIME:
                 if package.dTime > package.dDeadline:
                     #print('lost points')
-                    genome.fitness -= 50
+                    genome.fitness -= 100
         i+=1
         
 
@@ -198,11 +224,25 @@ def run(config_path):
 
     winner_net = neat.nn.FeedForwardNetwork.create(winner, config)
 
-  
+    
 
+    node_names = {-1: 'A',-2: 'B',-3: 'C',-4: 'D', -5: 'E',-6: 'F', 1: 'output'}
+    visualize.draw_net(config, winner, True, node_names=node_names)
+    visualize.plot_stats(stats, ylog=False, view=True)
+    visualize.plot_species(stats, view=True)
+    
+
+
+
+
+
+    #compare long to short
+    longest_distance = 0.0
+    shortest_distance = 100.0
     route=[]
     route.append('HUB')
     packages= []
+    
         
     current_destination = 'Western Governors University 4001 South 700 East,  Salt Lake City, UT 84107'
     current_time = datetime.time(8,0)
@@ -214,12 +254,12 @@ def run(config_path):
         if package.dAddress == ' 5383 South 900 East #104':
             package.dAddress = ' 5383 S 900 East #104'
         packages.append(package)
-    genome_package_scores = []
         #run
     finished = False
     while finished == False:
         package_list = []
         while len(package_list) <= MAX_PACKAGES: 
+            genome_package_scores = []
             distances= []
             for package in packages:
             #needed distance,package distance to hub, current time, current distance to hub, size of package list 
@@ -259,6 +299,11 @@ def run(config_path):
                 finished = True
                 #print(package.dStatus)
                 break
+            #print (best_distance)
+            if best_distance > longest_distance:
+                longest_distance = best_distance
+            if best_distance < shortest_distance:
+                shortest_distance = best_distance
             best_package.dStatus = "delivered"
             package_list.append(best_package)
             route.append(best_package.dAddress)
@@ -273,6 +318,10 @@ def run(config_path):
             #print(genome_id,': ',best_package.dID, ' : ', best_package.dAddress, ' : ', best_package.dTime)
             #go back to hub
         distance_to_hub = get_distance_to_hub(current_destination)
+        if distance_to_hub > longest_distance:
+            longest_distance = distance_to_hub
+        if distance_to_hub < shortest_distance:
+            shortest_distance = distance_to_hub
             
         time_taken = datetime.timedelta(hours=distance_to_hub.item()/AVERAGE_SPEED)
         start_datetime = datetime.datetime(1900,1,1,current_time.hour,current_time.minute,current_time.second)
@@ -293,6 +342,7 @@ def run(config_path):
                     #print('lost points')
                 missed_packages+=1
     print("time:", current_time,' : Late:', missed_packages)
+    print("shortest:", shortest_distance," longest:", longest_distance)
     #for i in route:
         #print(i)
     #shortest path
@@ -313,6 +363,7 @@ def run(config_path):
 
     current_destination = 'Western Governors University 4001 South 700 East,  Salt Lake City, UT 84107'
     current_time = datetime.time(8,0)
+    longest_distance = 0.0
     
     #print(current_time)
     finished = False
@@ -352,6 +403,8 @@ def run(config_path):
             if best_package == None:
                 finished = True
                 break
+            if best_distance > longest_distance:
+                longest_distance = best_distance
             best_package.dStatus = "delivered"
             package_list.append(best_package)
             route.append(best_package.dAddress)
@@ -368,6 +421,8 @@ def run(config_path):
             #print("deilvery time:",current_time)
         #go back to hub
         time_taken = datetime.timedelta(hours=distance_to_hub.item()/AVERAGE_SPEED)
+        if distance_to_hub.item() > longest_distance:
+            longest_distance = distance_to_hub
         start_datetime = datetime.datetime(1900,1,1,current_time.hour,current_time.minute,current_time.second)
         end_datetime = start_datetime + time_taken
         current_time = end_datetime.time()
@@ -384,6 +439,9 @@ def run(config_path):
                 #print('lost points')
                 missed_packages+=1
     print("time:", current_time,' : Late:', missed_packages)
+    print("shortest: 0.0 ","longest:", longest_distance)
+
+
 
     #for i in route:
         #print(i)
